@@ -467,6 +467,7 @@ def test_dont_configure_on_slaves(tmpdir):
         junitprefix = None
         # XXX: shouldnt need tmpdir ?
         xmlpath = str(tmpdir.join('junix.xml'))
+        junitcapture = None
         register = gotten.append
 
     fake_config = FakeConfig()

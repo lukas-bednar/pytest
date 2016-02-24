@@ -46,6 +46,12 @@ del _legal_chars
 del _legal_ranges
 del _legal_xml_re
 
+statuses = (
+    'error',
+    'passed',
+    'failure',
+    'skipped')
+
 
 def bin_xml_escape(arg):
     def repl(matchobj):
@@ -130,7 +136,8 @@ class _NodeReporter(object):
 
     def append_pass(self, report):
         self.add_stats('passed')
-        self._write_captured_output(report)
+        if 'passed' in self.xml.capture:
+            self._write_captured_output(report)
 
     def append_failure(self, report):
         # msg = str(report.longrepr.reprtraceback.extraline)
@@ -149,7 +156,8 @@ class _NodeReporter(object):
             fail = Junit.failure(message=message)
             fail.append(bin_xml_escape(report.longrepr))
             self.append(fail)
-        self._write_captured_output(report)
+        if 'failure' in self.xml.capture:
+            self._write_captured_output(report)
 
     def append_collect_error(self, report):
         # msg = str(report.longrepr.reprtraceback.extraline)
@@ -163,7 +171,8 @@ class _NodeReporter(object):
     def append_error(self, report):
         self._add_simple(
             Junit.error, "test setup failure", report.longrepr)
-        self._write_captured_output(report)
+        if 'error' in self.xml.capture:
+            self._write_captured_output(report)
 
     def append_skipped(self, report):
         if hasattr(report, "wasxfail"):
@@ -178,7 +187,8 @@ class _NodeReporter(object):
                 Junit.skipped("%s:%s: %s" % (filename, lineno, skipreason),
                               type="pytest.skip",
                               message=skipreason))
-        self._write_captured_output(report)
+        if 'skipped' in self.xml.capture:
+            self._write_captured_output(report)
 
     def finalize(self):
         data = self.to_xml().unicode(indent=0)
@@ -222,13 +232,30 @@ def pytest_addoption(parser):
         metavar="str",
         default=None,
         help="prepend prefix to classnames in junit-xml output")
+    group.addoption(
+        '--junitcapture', '--junit-capture',
+        action='append',
+        dest='junitcapture',
+        metavar='option',
+        choices=statuses + ('all', 'no'),
+        help="include captured outputs into results in case of 'option', "
+        "you can specify multiple options.")
 
 
 def pytest_configure(config):
     xmlpath = config.option.xmlpath
     # prevent opening xmllog on slave nodes (xdist)
     if xmlpath and not hasattr(config, 'slaveinput'):
-        config._xml = LogXML(xmlpath, config.option.junitprefix)
+        if (
+            config.option.junitcapture is None or
+            'all' in config.option.junitcapture
+        ):
+            capture = statuses[:]
+        else:
+            capture = tuple()
+            if 'no' in config.option.junitcapture:
+                capture = (c for c in config.option.junitcapture)
+        config._xml = LogXML(xmlpath, config.option.junitprefix, capture)
         config.pluginmanager.register(config._xml)
 
 
@@ -246,16 +273,12 @@ def mangle_testnames(names):
 
 
 class LogXML(object):
-    def __init__(self, logfile, prefix):
+    def __init__(self, logfile, prefix, capture=statuses):
         logfile = os.path.expanduser(os.path.expandvars(logfile))
         self.logfile = os.path.normpath(os.path.abspath(logfile))
         self.prefix = prefix
-        self.stats = dict.fromkeys([
-            'error',
-            'passed',
-            'failure',
-            'skipped',
-        ], 0)
+        self.capture = capture
+        self.stats = dict.fromkeys(statuses, 0)
         self.node_reporters = {}  # nodeid -> _NodeReporter
         self.node_reporters_ordered = []
 
